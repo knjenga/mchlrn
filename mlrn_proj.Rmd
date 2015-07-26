@@ -1,0 +1,273 @@
+---
+title: "Human Activity Recognition Analysis"
+output:
+  html_document:
+    toc: yes
+---
+```{r,echo=TRUE,warning=FALSE,error=FALSE,results="hide"}
+library(dplyr)
+library(caret)
+library(corrgram)
+library(randomForest)
+```
+
+
+## Background
+
+Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of data about personal activity relatively inexpensively. These type of devices are part of the quantified self movement - a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behavior, or because they are tech geeks. One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it. In this project, your goal will be to use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants. They were asked to perform barbell lifts correctly and incorrectly in 5 different ways. More information is available from the website here: http://groupware.les.inf.puc-rio.br/har (see the section on the Weight Lifting Exercise Dataset).
+
+1.Exactly according to the specification (Class A)
+
+2.Throwing the elbows to the front (Class B)
+
+3.Lifting the dumbbell only halfway (Class C)
+
+4.Lowering the dumbbell only halfway (Class D)
+
+5.Throwing the hips to the front (Class E)
+
+The goal of your project is to predict the manner in which they did the exercise. This is the "classe" variable in the training set. You may use any of the other variables to predict with. 
+
+## Executive Summary
+
+From my Analysis, if one was to use Dumbbells in their training they should pay special attention to the movement of their forearm and waist. After Modeling and validating the data, I looked at the top 20 variables that that determined the class the user would fall into.  It appears from the Analysis that how they moved their waist and for arm where was the biggest determinate of how well one was exercising with Dumbbells. If one removes all the variables that measure the location of the Dumbbell at the time of the reading; all the other important variables reading have the names waist and forearm in them, they measure the where the waist and forearm when doing the exercise. For the full result of the importance of the variables look at Appendix A.3
+
+Initially I planned to several models and compare them, and perhaps combine them to get better predictions however, after running my analysis using random forests I was surprised by the accuracy of the model and decided not to pursue any further algorithms.
+
+## Data Discovery
+
+
+### Loading the Data
+
+Load Data Sets (Training and Testing)
+
+```{r, echo=TRUE}
+# Load data files into R
+ training_raw <- read.csv("pml-training.csv", header = TRUE, na.strings=c("NA", "#DIV/0!"))
+ test_raw  <- read.csv('pml-testing.csv',header = TRUE, na.strings=c("NA", "#DIV/0!"))
+```
+
+### Preprocessing the Data
+
+My initial review of the data showed many Issues with the data.
+
+1.Many columns with No data (NA) values
+
+2.Many columns with a single value or very low frequencies
+
+3.Columns with data that was not relevant to the analysis like record number and timestamps.
+
+The issues highlighted above can be a burden to many machine learning procedures. I resolved to remove them from the analytical data sets by:
+
+1.Removing the columns that are not needed for analysis like time stamps,names and row numbers.
+
+2.Removing the columns that have  that Zero and Near Zero-Variance Predictors.
+
+3.Impune the missing values to those columns that are left that have missing values.
+
+4.Center and Scale the data.
+
+```{r,echo=TRUE}
+# set the seed to ensure repatable answers
+   set.seed(12121963)
+# Removing the columns that are not needed for analysis like time stamps,names and row numbers.
+   training <- training_raw[,-c(1:8)]
+# Removing the columns that have  that Zero and Near Zero-Variance Predictors.
+   NZV_columns <- nearZeroVar(training, saveMetrics = TRUE)
+   training <- training[, NZV_columns$nzv == FALSE]
+# Impune the missing values to those columns that are left that have missing values
+# Impune the columns that will be impuned,centered and scaled
+   numeric_columns <- which(lapply(training,class) %in% c('numeric','intiger'))
+# Get the impute model
+   impute_mdl <- preProcess(training[,numeric_columns], method=c('knnImpute'))
+# Assign the impuned data values
+   train_imp <- predict(impute_mdl,training[,numeric_columns])
+# Add back the non-numeric columns
+   training <- cbind(training$classe, train_imp)
+   colnames(training)[1] <- "classe"
+# capture final results
+   train_cols <- dim(training_raw)[2]
+   procd_cols <- dim(training)[2]
+```
+
+The original training data set had  **`r train_cols`** variables before, after the initial pre-processing steps the zero-variance predictors, **`r procd_cols`** .I felt that the number was still high so I decided to see if the data had columns that were highly correlated and candidates for further reduction.To answer this question I did the following;
+
+1. Carried out some Correantion Analyis
+
+```{r, echo=TRUE}
+#create a correaltion matrix of the cleaned data
+ training_corr <- cor(train_imp)
+ high_corr_row_count <- nrow(which(training_corr > 0.7, arr.ind=T))
+ pct_cnt <- round((high_corr_row_count/((dim(training_corr)[1])^2))*100,3)
+```
+
+A visual inspection of the correlation matrix graph appears that there are not many columns that have strong very strong linear relationships (Those areas that are highlighted in Red). Typically a linear relationship of +0.70 indicates the possibility of a strong uphill (positive) linear relationship between two variables.  The analysis shows there are **`r high_corr_row_count`**  relationships that have high strong linear relationships. which is **`r pct_cnt`** Percent of the total. For a full review of the output see appendix A.2.
+
+## Data Modeling
+
+The Random Forests algorithm is one of the best among classification algorithms - able to classify large amounts of data with accuracy. I decided to use it to predict what classes.
+
+### Train the Model
+
+```{r,echo=TRUE,message=FALSE,warning=FALSE,results="hide"}
+  factor(training$classe)
+```
+
+```{r,echo=TRUE}
+# split into traing and validation sets
+   train_split <- createDataPartition(training$classe, p = 0.80, list = FALSE)
+   train_learn <- training[train_split, ]
+   train_valid <- training[-train_split, ]
+# Train the model with the learning data set
+   rf_mdl <- train(classe ~ ., method="rf", data=train_learn)
+```
+
+#### Training the Model Analyis
+
+
+```{r}
+# Summary of the Model
+   print(rf_mdl)
+```
+
+Final Random Forest Model output
+
+```{r}
+ print(rf_mdl$finalModel)
+```
+
+### Validate the Model
+
+```{r,echo=TRUE}
+# Validate the model with the validation data set
+   rf_valid <- predict(rf_mdl,train_valid)
+# Confusion matrix for validation step
+  confusionMatrix(rf_valid, train_valid$classe)
+```
+
+The Accuracy of the Model was 99.02%! With a confidence interval 0.987 - 0.9928 for 95%CI, Astonishing!
+
+```{r}
+# Plot the model
+   plot(rf_valid,log="y",main="Validation Counts By Classe")
+```
+
+### Sample Error Analyis
+
+Sampling Errors - The sampling error is the difference between a sample statistic used to estimate a population parameter and the actual but unknown value of the parameter. The sampling error calculations was carried out in two groups. First was the error for the learning step and the other for the validation step.
+
+Since I used the Random forest classifier; there is was no need to perform Sample Error Analysis. In random forests, there is no need for cross-validation or a separate test set to get an unbiased estimate of the test set error. It is estimated internally, during the run because each tree is constructed using a different bootstrap sample from the original data. The Sample Error rate for the method is called the Out of the Box error which was for the training model was 1.01%. The diagram bellow shows how the Error went from about 15% to near Zero after the first 100 Trees were built.
+
+### Random Forest Model Sampling Error Graph(s)
+
+##### Sampling Error Based on the Number of Trees
+
+```{r,echo=TRUE}
+ # Plot the random forest Error over muliple Tree Iterations
+    plot(rf_mdl$finalModel,main="Error by Trees # For Classes")
+```
+
+##### Sampling Error Based on the Random Selected Predictors
+
+```{r}
+# Plot the random forest Error based on the number of Randomly selected Variables.
+   plot(rf_mdl,log="y", main="Error by Predictor Varaibles Used")
+```
+
+However, I did carry out some rudimentary Error Analysis suing the description provided above.
+
+#### Sample errors (in sample) 
+```{r,echo=TRUE}
+# Predict the classe using the model crerated on the original learing data
+   rf_pred_learn <- predict(rf_mdl,train_learn)
+# calculate the Sampling error for the training step
+   smp_err_in <- rf_pred_learn == train_learn$classe
+   summary(smp_err_in)
+   in_err_pct <- (sum(smp_err_in == FALSE)/sum(smp_err_in == TRUE))*100
+```
+
+The in-smaple Sampling error was **`r in_err_pct`** %.
+
+#### Sample errors (in cross-validation) 
+```{r,echo=TRUE}
+# calculate the Sampling error for the cross validation step
+  smp_err_out <- rf_valid == train_valid$classe
+  summary(smp_err_out)
+  out_err_pct <- (sum(smp_err_out == FALSE)/sum(smp_err_out == TRUE))*100
+```
+
+The in-smaple Sampling error was **`r round(out_err_pct,2)`** %.
+
+## Analysis Results
+
+The top 20 Most Imporant varaible in determing how well one is excerssing with dumbless are shown in the Diagram Bellow. It appears from the Analysis that how they moved their waist and for arm where was the biggest determinate of how well one was exercising with Dumbbells. If one removes all the variables that measure the location of the Dumbbell at the time of the reading; all the other important variables reading have the names waist and forearm in them, they measure the where the waist and forearm when doing the exercise. For the full result of the importance of the variables look at Appendix A.3 Predictor Variable Importance.
+
+
+```{r,echo=TRUE}
+ # what are the most important variables from the model
+   var_importance <- varImp(rf_mdl, scale=FALSE)
+   plot(var_importance, top=20)
+```
+
+## Testing the Model
+
+After creating and validating the Random Forest Model, I tested the model with a test file by predcting what class the subjects would bellong. 
+
+```{r,echo=TRUE,message=FALSE,warning=FALSE,results="hide"}
+# remove from test data set any columns not used to build the Random Forest Model
+  test <- test_raw[, colnames(train_imp)]
+# Repalce NAs with Zeros
+  test[is.na(test)] <- 0
+# Apply the same pre-processing process that was used in the traing and validation steps
+  test_sc <- preProcess(test, method = c("center", "scale","knnImpute"))
+  test_clean <- predict(test_sc, test)
+# Make the predictions
+  rf_test <- predict(rf_mdl,newdata=test_clean)
+# Write the result in the working Directory
+  filename <- getwd()
+# Function to purse and break down the results into individual files.
+      pml_write_files = function(x){
+         n = length(x)
+         for(i in 1:n){
+            filename = paste0("problem_id_",i,".txt")
+            write.table(x[i],file=filename,quote=FALSE,row.names=FALSE,col.names=FALSE)
+         }
+      }
+# Process test results
+pml_write_files(rf_test)
+```
+
+The predictions for the test data are listed Bellow
+
+### Test Result String
+```{r,echo=TRUE}
+ rf_test# Test Reuslts
+```
+
+### Test Result Graph
+```{r,echo=TRUE}
+ plot(rf_test,main="Test Predictions by Class")
+```
+
+## Appendix
+
+### A.1 - Zero and Near Zero-Variance Predictors eliminated Analyis output
+
+```{r,echo=TRUE}
+filter(NZV_columns,nzv==TRUE)
+```
+
+### A.2 - Possible Correlated columns after first pre-processing steps.
+```{r, echo=TRUE}
+corrgram(training_corr,order=TRUE,lower.panel=panel.shade,upper.panel=panel.pie,text.panel=panel.txt)
+```
+
+### A.3 Predictor Variable Importance.
+
+```{r,echo=TRUE}
+ plot(var_importance)
+```
+
+
+
+
